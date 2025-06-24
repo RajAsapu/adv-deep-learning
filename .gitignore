@@ -1,5 +1,6 @@
 .venv/*
 .venv1/*
 .idea/*
-Homework1/grader/__pycache__
-Homework1/homework/__pycache__
+*/grader/__pycache__
+*/homework/__pycache__
+Homework2/data/*
