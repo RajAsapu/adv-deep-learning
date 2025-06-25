@@ -63,11 +63,11 @@ def train(model_name_or_path: str, epochs: int = 5, batch_size: int = 64):
 
         def train_dataloader(self):
             dataset = ImageDataset("train")
-            return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=True)
+            return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=False, persistent_workers=True)
 
         def val_dataloader(self):
             dataset = ImageDataset("valid")
-            return torch.utils.data.DataLoader(dataset, batch_size=4096, num_workers=4, shuffle=True)
+            return torch.utils.data.DataLoader(dataset, batch_size=4096, num_workers=4, shuffle=False, persistent_workers=True)
 
     class AutoregressiveTrainer(L.LightningModule):
         def __init__(self, model):

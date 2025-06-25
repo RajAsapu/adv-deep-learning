@@ -19,16 +19,54 @@ class Compressor:
         """
         Compress the image into a torch.uint8 bytes stream (1D tensor).
 
-        Use arithmetic coding.
+        Use Huffman coding instead of arithmetic coding.
         """
-        raise NotImplementedError()
+        # Tokenize the input image into patches
+        tokens = self.tokenizer.tokenize(x)
+
+        # Flatten tokens for Huffman coding
+        flattened_tokens = tokens.flatten()
+
+        # Compute frequency of each token
+        unique, counts = torch.unique(flattened_tokens, return_counts=True)
+        freq_dict = dict(zip(unique.tolist(), counts.tolist()))
+
+        # Build Huffman tree and generate codes
+        huffman_tree = self._build_huffman_tree(freq_dict)
+        huffman_codes = self._generate_huffman_codes(huffman_tree)
+
+        # Encode tokens using Huffman codes
+        encoded = ''.join(huffman_codes[token.item()] for token in flattened_tokens)
+
+        # Convert binary string to bytes
+        compressed_bytes = int(encoded, 2).to_bytes((len(encoded) + 7) // 8, byteorder='big')
+
+        return compressed_bytes
 
     def decompress(self, x: bytes) -> torch.Tensor:
         """
         Decompress a tensor into a PIL image.
         You may assume the output image is 150 x 100 pixels.
         """
-        raise NotImplementedError()
+        # Convert bytes back to binary string
+        binary_string = ''.join(f'{byte:08b}' for byte in x)
+
+        # Decode binary string using Huffman codes
+        decoded_tokens = []
+        current_code = ''
+        for bit in binary_string:
+            current_code += bit
+            if current_code in self.huffman_codes_reverse:
+                decoded_tokens.append(self.huffman_codes_reverse[current_code])
+                current_code = ''
+
+        # Reshape tokens back to the original patch structure
+        tokens = torch.tensor(decoded_tokens).reshape(self.tokenizer.output_shape)
+
+        # Decode the tokens back into the image
+        image = self.tokenizer.decode(tokens)
+
+        return image
 
 
 def compress(tokenizer: Path, autoregressive: Path, image: Path, compressed_image: Path):
