@@ -63,6 +63,15 @@ class BSQ(torch.nn.Module):
 
         x = self.down_projection(x)  # Apply the linear down-projection
         x = torch.nn.functional.normalize(x, p=2, dim=-1)  # Normalize using L2 norm
+
+        # Permute to (batch, features) -> (features, batch) for BatchNorm1d, then back
+        print("Before permute for BatchNorm:", x.shape)
+        x = x.permute(1, 0)
+        bn = torch.nn.BatchNorm1d(x.size(0)).to(x.device)
+        x = bn(x)
+        x = x.permute(1, 0)
+        print("After BatchNorm and permute back:", x.shape)
+
         x = diff_sign(x)  # Apply differentiable sign
         return x
 
