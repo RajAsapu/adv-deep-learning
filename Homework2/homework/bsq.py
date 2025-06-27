@@ -58,13 +58,13 @@ class BSQ(torch.nn.Module):
         - L2 normalization
         - differentiable sign
         """
-        # Reshape the input tensor to ensure compatibility with down_projection
-        x = x.view(-1, self.embedding_dim)  # Flatten the input to (batch_size * patches, embedding_dim)
-
-        x = self.down_projection(x)  # Apply the linear down-projection
-        x = torch.nn.functional.normalize(x, p=2, dim=-1)  # Normalize using L2 norm
-        x = diff_sign(x)  # Apply differentiable sign
-        return x
+        x_shape = x.shape
+        assert x_shape[-1] == self.embedding_dim, \
+            f"Expected last dim {self.embedding_dim}, got {x_shape[-1]}"
+        x = self.down_projection(x)  # (B, h, w, codebook_bits)
+        x = torch.nn.functional.normalize(x, p=2, dim=-1)
+        x = diff_sign(x)
+        return x  # (B, h, w, codebook_bits)
 
     def decode(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -72,9 +72,10 @@ class BSQ(torch.nn.Module):
         - A linear up-projection into embedding_dim should suffice
         """
         # Reshape the input tensor to ensure compatibility with up_projection
-        x = x.view(-1, self.codebook_bits)  # Flatten the input to (batch_size * patches, codebook_bits)
-
-        x = self.up_projection(x)  # Apply the linear up-projection
+        x_shape = x.shape
+        assert x_shape[-1] == self.codebook_bits, \
+            f"Expected last dim {self.codebook_bits}, got {x_shape[-1]}"
+        x = self.up_projection(x)  # (B, h, w, embedding_dim)
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -108,65 +109,54 @@ class BSQPatchAutoEncoder(PatchAutoEncoder, Tokenizer):
           Changing the patch-size of codebook-size will complicate later parts of the assignment.
     """
 
-    def __init__(self, patch_size: int = 5, latent_dim: int = 128, codebook_bits: int = 10, input_shape: tuple[int, int, int, int] = (1, 28, 28, 3)):
+    def __init__(self, patch_size: int = 5, latent_dim: int = 128, codebook_bits: int = 10,
+                 input_shape: tuple[int, int, int, int] = (1, 28, 28, 3)):
         super().__init__(patch_size=patch_size, latent_dim=latent_dim)
         self.bsq = BSQ(codebook_bits=codebook_bits, embedding_dim=latent_dim)
-        self.input_shape=input_shape
+        self.input_shape = input_shape
 
     def encode_index(self, x: torch.Tensor) -> torch.Tensor:
         """
         Tokenize an image tensor into integer tokens using BSQ.
         """
-        return self.bsq.encode_index(self.encode(x))
+        features = super().encode(x)  # (B, h, w, latent_dim)
+        return self.bsq.encode_index(features)  # (B, h, w)
 
     def decode_index(self, x: torch.Tensor) -> torch.Tensor:
         """
         Decode integer tokens back into an image tensor using BSQ.
         """
-        return self.decode(self.bsq.decode_index(x))
+        decoded_features = self.bsq.decode_index(x)  # (B, h, w, latent_dim)
+        return super().decode(decoded_features)  # (B, H, W, C)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """
         Encode the input tensor using the auto-encoder and BSQ quantizer.
         """
+        # Encode with PatchAutoEncoder, then quantize with BSQ
         features = super().encode(x)
         return self.bsq.encode(features)
 
-
     def decode(self, x: torch.Tensor) -> torch.Tensor:
         """
-               Decode the quantized features back into the original space.
-               Ensure the output shape matches the input shape.
-               """
-        decoded_features = self.bsq.decode(x)
-        reconstructed = super().decode(decoded_features)
+        Decode the quantized features back into the original space.
+        Ensure the output shape matches the input shape.
+        """
+        # Decode with BSQ, then reconstruct with PatchAutoEncoder
+        decoded = self.bsq.decode(x)
+        return super().decode(decoded)
 
-        # Reshape the reconstructed tensor to match the input shape
-        batch_size = reconstructed.size(0)
-        height, width, channels = self.input_shape[1:]
-        reconstructed = reconstructed.view(batch_size, *self.input_shape[1:])
-        return reconstructed
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """
         Return the reconstructed image and a dictionary of additional loss terms you would like to
         minimize (or even just visualize).
-        Hint: It can be helpful to monitor the codebook usage with
-
-              cnt = torch.bincount(self.encode_index(x).flatten(), minlength=2**self.bsq._codebook_bits)
-
-              and returning
-
-              {
-                "cb0": (cnt == 0).float().mean().detach(),
-                "cb2": (cnt <= 2).float().mean().detach(),
-                ...
-              }
         """
-        reconstructed = self.decode(self.encode(x))
-        cnt = torch.bincount(self.encode_index(x).flatten(), minlength=2 ** self.bsq.codebook_bits)
-        loss_terms = {
+        recon = self.decode(self.encode(x))
+        tokens = self.encode_index(x).flatten().to(torch.long)
+        cnt = torch.bincount(tokens, minlength=2 ** self.bsq.codebook_bits)
+        stats = {
             "cb0": (cnt == 0).float().mean().detach(),
             "cb2": (cnt <= 2).float().mean().detach(),
         }
-        return reconstructed, loss_terms
+        return recon, stats

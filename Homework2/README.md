@@ -108,7 +108,12 @@ python -m homework.tokenize checkpoints/YOUR_BSQPatchAutoEncoder.pth data/tokeni
 
 python -m homework.tokenize checkpoints/YOUR_BSQPatchAutoEncoder.pth data/tokenized_valid.pth data/valid/*.jpg
 ```
-
+```bash
+find data/train -name '*.jpg' | xargs python -m homework.tokenize checkpoints/2025-06-27_11-53-43_BSQPatchAutoEncoder.pth data/tokenized_train.pth
+```
+```bash
+find data/valid -name '*.jpg' | xargs python -m homework.tokenize checkpoints/2025-06-27_11-53-43_BSQPatchAutoEncoder.pth data/tokenized_valid.pth
+```
 This will create two files `data/tokenized_train.pth` and `data/tokenized_valid.pth` containing the entire training and
 validation datasets.
 
@@ -237,7 +242,7 @@ This will avoid computation errors when running the BSQ model on Apple Silicon (
 Once you finished the assignment, create a submission bundle using:
 
 ```bash
-python3 bundle.py homework debug
+python bundle.py homework debug
 ```
 
 Submit the zip file on Canvas. Please note that the maximum file size our grader accepts is **20MB**. Please keep your
@@ -245,7 +250,7 @@ solution compact.
 Please double-check that your zip file was properly created, by grading it again:
 
 ```bash
-python3 -m grader debug.zip
+python -m grader debug.zip
 ```
 
 ## Online grader
