@@ -44,12 +44,13 @@ class Tokenizer(abc.ABC):
 
 
 class BSQ(torch.nn.Module):
-    def __init__(self, codebook_bits: int, embedding_dim: int):
+    def __init__(self, codebook_bits: int, embedding_dim: int, dropout_p: float = 0.01):
         super().__init__()
         self.codebook_bits = codebook_bits
         self.embedding_dim = embedding_dim
         self.down_projection = torch.nn.Linear(embedding_dim, codebook_bits)
         self.up_projection = torch.nn.Linear(codebook_bits, embedding_dim)
+        self.dropout = torch.nn.Dropout(dropout_p)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -62,6 +63,7 @@ class BSQ(torch.nn.Module):
         assert x_shape[-1] == self.embedding_dim, \
             f"Expected last dim {self.embedding_dim}, got {x_shape[-1]}"
         x = self.down_projection(x)  # (B, h, w, codebook_bits)
+        x = self.dropout(x)
         x = torch.nn.functional.normalize(x, p=2, dim=-1)
         x = diff_sign(x)
         return x  # (B, h, w, codebook_bits)
@@ -76,6 +78,7 @@ class BSQ(torch.nn.Module):
         assert x_shape[-1] == self.codebook_bits, \
             f"Expected last dim {self.codebook_bits}, got {x_shape[-1]}"
         x = self.up_projection(x)  # (B, h, w, embedding_dim)
+        x = self.dropout(x)
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -110,9 +113,9 @@ class BSQPatchAutoEncoder(PatchAutoEncoder, Tokenizer):
     """
 
     def __init__(self, patch_size: int = 5, latent_dim: int = 128, codebook_bits: int = 10,
-                 input_shape: tuple[int, int, int, int] = (1, 28, 28, 3)):
+                 input_shape: tuple[int, int, int, int] = (1, 28, 28, 3), dropout_p: float = 0.02):
         super().__init__(patch_size=patch_size, latent_dim=latent_dim)
-        self.bsq = BSQ(codebook_bits=codebook_bits, embedding_dim=latent_dim)
+        self.bsq = BSQ(codebook_bits=codebook_bits, embedding_dim=latent_dim, dropout_p=dropout_p)
         self.input_shape = input_shape
 
     def encode_index(self, x: torch.Tensor) -> torch.Tensor:
