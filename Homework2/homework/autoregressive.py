@@ -65,21 +65,24 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         self.to_logits = torch.nn.Linear(d_latent, n_tokens)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        # x: (B, h, w) integer tokens
-        B, h, w = x.shape
-        seq_len = h * w
-        x_flat = x.view(B, seq_len)  # (B, seq_len)
-        # Shift right for autoregressive prediction
-        x_shifted = torch.nn.functional.pad(x_flat, (1, 0), value=0)[:, :-1]
-        emb = self.embedding(x_shifted)  # (B, seq_len, d_latent)
-        # Causal mask
-        mask = torch.nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
-        out = self.transformer(emb, mask=mask)  # (B, seq_len, d_latent)
-        logits = self.to_logits(out)  # (B, seq_len, n_tokens)
-        logits = logits.view(B, h, w, self.n_tokens)
-        return logits, {}
+          # x: (B, h, w) integer tokens
+          B, h, w = x.shape
+          seq_len = h * w
+          x_flat = x.view(B, seq_len)  # (B, seq_len)
+          emb = self.embedding(x_flat)  # (B, seq_len, d_latent)
+          # Shift right for autoregressive prediction (after embedding)
+          emb_shifted = torch.nn.functional.pad(emb, (0, 0, 1, 0), value=0)[:, :-1, :]
+          # Causal mask for TransformerEncoder: shape (seq_len, seq_len)
+          mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+          out = self.transformer(emb_shifted, mask=mask)  # (B, seq_len, d_latent)
+          logits = self.to_logits(out)  # (B, seq_len, n_tokens)
+          logits = logits.view(B, h, w, self.n_tokens)
+          return logits, {}
 
-    def generate(self, B: int = 1, h: int = 30, w: int = 20, device=None) -> torch.Tensor:
+    def generate(self, B: int = 1, h: int = 20, w: int = 30, device=None) -> torch.Tensor:
+        """
+        Use your generative model to produce B new token images of size (B, h, w) and type (int/long).
+        """
         if device is None:
             device = next(self.parameters()).device
         self.eval()
@@ -87,13 +90,14 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         x_gen = torch.zeros((B, seq_len), dtype=torch.long, device=device)
         with torch.no_grad():
             for t in range(seq_len):
-                # Shift right: mask out future tokens
+                # Shift right: only use generated tokens up to t
                 x_shifted = torch.nn.functional.pad(x_gen, (1, 0), value=0)[:, :-1]
                 emb = self.embedding(x_shifted)
-                mask = torch.nn.Transformer.generate_square_subsequent_mask(seq_len).to(device)
-                out = self.transformer(emb, mask=mask)
-                logits = self.to_logits(out)  # (B, seq_len, n_tokens)
-                probs = torch.softmax(logits[:, t, :], dim=-1)  # (B, n_tokens)
+                # Causal mask for only t+1 tokens
+                mask = torch.triu(torch.ones(t + 1, t + 1, device=device), diagonal=1).bool()
+                out = self.transformer(emb[:, :t + 1, :], mask=mask)
+                logits = self.to_logits(out)  # (B, t+1, n_tokens)
+                probs = torch.softmax(logits[:, -1, :], dim=-1)  # (B, n_tokens)
                 next_token = torch.multinomial(probs, num_samples=1).squeeze(-1)
                 x_gen[:, t] = next_token
-        return x_gen.view(B, h, w)
+        return x_gen.view(B, h, w).to(torch.long)
