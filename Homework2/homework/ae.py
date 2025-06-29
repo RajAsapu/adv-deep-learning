@@ -118,7 +118,9 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
 
         def __init__(self, patch_size: int, latent_dim: int, bottleneck: int):
             super().__init__()
-            self.patch_conv = nn.Conv2d(3,latent_dim,patch_size,patch_size,bias=False)
+            self.patch_conv = nn.Conv2d(3, latent_dim, patch_size, patch_size, bias=False)
+            self.conv1 = nn.Conv2d(latent_dim, latent_dim, 3, padding=1, bias=False)
+            self.conv2 = nn.Conv2d(latent_dim, latent_dim, 3, padding=1, bias=False)
             self.bottleneck = nn.Conv2d(latent_dim, bottleneck, 1, bias=False)
             self.activation = nn.ReLU()
 
@@ -126,19 +128,29 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
             x = hwc_to_chw(x)
             x = self.patch_conv(x)
             x = self.activation(x)
+            x = self.conv1(x)
+            x = self.activation(x)
+            x = self.conv2(x)
+            x = self.activation(x)
             x = self.bottleneck(x)
             return chw_to_hwc(x)
 
     class PatchDecoder(torch.nn.Module):
         def __init__(self, patch_size: int, latent_dim: int, bottleneck: int):
             super().__init__()
-            self.unbottleneck = nn.ConvTranspose2d(bottleneck, latent_dim, 1 , bias=False)
-            self.unpatch_conv = nn.ConvTranspose2d(latent_dim,3,patch_size,patch_size,bias=False)
-            self.activation= nn.ReLU()
+            self.unbottleneck = nn.ConvTranspose2d(bottleneck, latent_dim, 1, bias=False)
+            self.deconv1 = nn.ConvTranspose2d(latent_dim, latent_dim, 3, padding=1, bias=False)
+            self.deconv2 = nn.ConvTranspose2d(latent_dim, latent_dim, 3, padding=1, bias=False)
+            self.unpatch_conv = nn.ConvTranspose2d(latent_dim, 3, patch_size, patch_size, bias=False)
+            self.activation = nn.ReLU()
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             x = hwc_to_chw(x)
             x = self.unbottleneck(x)
+            x = self.activation(x)
+            x = self.deconv1(x)
+            x = self.activation(x)
+            x = self.deconv2(x)
             x = self.activation(x)
             x = self.unpatch_conv(x)
             return chw_to_hwc(x)

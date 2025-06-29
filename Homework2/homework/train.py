@@ -59,7 +59,7 @@ def train(model_name_or_path: str, epochs: int = 5, batch_size: int = 64):
             return loss
 
         def configure_optimizers(self):
-            return torch.optim.AdamW(self.parameters(), lr=0.001)
+            return torch.optim.AdamW(self.parameters(), lr=0.0015)
 
         def train_dataloader(self):
             dataset = ImageDataset("train")
@@ -104,11 +104,11 @@ def train(model_name_or_path: str, epochs: int = 5, batch_size: int = 64):
 
         def train_dataloader(self):
             dataset = TokenDataset("train")
-            return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=True)
+            return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=False)
 
         def val_dataloader(self):
             dataset = TokenDataset("valid")
-            return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=True)
+            return torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=4, shuffle=False)
 
     class CheckPointer(L.Callback):
         def on_train_epoch_end(self, trainer, pl_module):

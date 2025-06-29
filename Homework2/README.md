@@ -109,10 +109,10 @@ python -m homework.tokenize checkpoints/YOUR_BSQPatchAutoEncoder.pth data/tokeni
 python -m homework.tokenize checkpoints/YOUR_BSQPatchAutoEncoder.pth data/tokenized_valid.pth data/valid/*.jpg
 ```
 ```bash
-find data/train -name '*.jpg' | xargs python -m homework.tokenize checkpoints/2025-06-27_11-53-43_BSQPatchAutoEncoder.pth data/tokenized_train.pth
+find data/train -name '*.jpg' | xargs python -m homework.tokenize checkpoints/2025-06-27_19-17-45_BSQPatchAutoEncoder.pth data/tokenized_train.pth
 ```
 ```bash
-find data/valid -name '*.jpg' | xargs python -m homework.tokenize checkpoints/2025-06-27_11-53-43_BSQPatchAutoEncoder.pth data/tokenized_valid.pth
+find data/valid -name '*.jpg' | xargs python -m homework.tokenize checkpoints/2025-06-27_19-17-45_BSQPatchAutoEncoder.pth data/tokenized_valid.pth
 ```
 This will create two files `data/tokenized_train.pth` and `data/tokenized_valid.pth` containing the entire training and
 validation datasets.

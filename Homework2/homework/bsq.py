@@ -101,7 +101,7 @@ class BSQ(torch.nn.Module):
         return (x * 2 ** torch.arange(x.size(-1)).to(x.device)).sum(dim=-1)
 
     def _index_to_code(self, x: torch.Tensor) -> torch.Tensor:
-        return 2 * ((x[..., None] & (2 ** torch.arange(self._codebook_bits).to(x.device))) > 0).float() - 1
+        return 2 * ((x[..., None] & (2 ** torch.arange(self.codebook_bits).to(x.device))) > 0).float() - 1
 
 
 class BSQPatchAutoEncoder(PatchAutoEncoder, Tokenizer):

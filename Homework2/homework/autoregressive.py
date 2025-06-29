@@ -53,12 +53,47 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
     Hint: You can complete this homework without using positional embeddings
     """
 
-    def __init__(self, d_latent: int = 128, n_tokens: int = 2**10):
+    def __init__(self, d_latent: int = 128, n_tokens: int = 2 ** 10):
         super().__init__()
-        raise NotImplementedError()
+        self.n_tokens = n_tokens
+        self.d_latent = d_latent
+        self.embedding = torch.nn.Embedding(n_tokens, d_latent)
+        self.transformer = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True),
+            num_layers=8
+        )
+        self.to_logits = torch.nn.Linear(d_latent, n_tokens)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        raise NotImplementedError()
+        # x: (B, h, w) integer tokens
+        B, h, w = x.shape
+        seq_len = h * w
+        x_flat = x.view(B, seq_len)  # (B, seq_len)
+        # Shift right for autoregressive prediction
+        x_shifted = torch.nn.functional.pad(x_flat, (1, 0), value=0)[:, :-1]
+        emb = self.embedding(x_shifted)  # (B, seq_len, d_latent)
+        # Causal mask
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(seq_len).to(x.device)
+        out = self.transformer(emb, mask=mask)  # (B, seq_len, d_latent)
+        logits = self.to_logits(out)  # (B, seq_len, n_tokens)
+        logits = logits.view(B, h, w, self.n_tokens)
+        return logits, {}
 
-    def generate(self, B: int = 1, h: int = 30, w: int = 20, device=None) -> torch.Tensor:  # noqa
-        raise NotImplementedError()
+    def generate(self, B: int = 1, h: int = 30, w: int = 20, device=None) -> torch.Tensor:
+        if device is None:
+            device = next(self.parameters()).device
+        self.eval()
+        seq_len = h * w
+        x_gen = torch.zeros((B, seq_len), dtype=torch.long, device=device)
+        with torch.no_grad():
+            for t in range(seq_len):
+                # Shift right: mask out future tokens
+                x_shifted = torch.nn.functional.pad(x_gen, (1, 0), value=0)[:, :-1]
+                emb = self.embedding(x_shifted)
+                mask = torch.nn.Transformer.generate_square_subsequent_mask(seq_len).to(device)
+                out = self.transformer(emb, mask=mask)
+                logits = self.to_logits(out)  # (B, seq_len, n_tokens)
+                probs = torch.softmax(logits[:, t, :], dim=-1)  # (B, n_tokens)
+                next_token = torch.multinomial(probs, num_samples=1).squeeze(-1)
+                x_gen[:, t] = next_token
+        return x_gen.view(B, h, w)
