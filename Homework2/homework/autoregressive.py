@@ -1,6 +1,7 @@
 import abc
 
 import torch
+from torch import nn
 
 
 def load() -> torch.nn.Module:
@@ -41,63 +42,99 @@ class Autoregressive(abc.ABC):
         """
 
 
-class AutoregressiveModel(torch.nn.Module, Autoregressive):
+class AutoregressiveModel(nn.Module, Autoregressive):
     """
-    Implement an auto-regressive model.
-    The input is a set of patch tokens (integers), the output is an image of probability.
-    You need to implicitly shift your inputs by one position in the forward pass.
-    Make sure n_tokens matches your BSQ dimension (2**codebook_bits_).
-
-    Hint: You will need the torch.nn.Embedding function
-    Hint: You can use torch.nn.TransformerEncoderLayer if you'd like
-    Hint: You can complete this homework without using positional embeddings
+    Improved autoregressive model with positional embeddings, increased capacity,
+    layer normalization, and dropout.
     """
 
-    def __init__(self, d_latent: int = 128, n_tokens: int = 2 ** 10):
+    def __init__(self, d_latent: int = 256, n_tokens: int = 2 ** 10, n_layers: int = 12, n_heads: int = 8,
+                 dropout: float = 0.1):
         super().__init__()
         self.n_tokens = n_tokens
         self.d_latent = d_latent
-        self.embedding = torch.nn.Embedding(n_tokens, d_latent)
-        self.transformer = torch.nn.TransformerEncoder(
-            torch.nn.TransformerEncoderLayer(d_latent, nhead=8, batch_first=True),
-            num_layers=8
+
+        # Initialize embedding with scaled initialization
+        self.embedding = nn.Embedding(n_tokens, d_latent)
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=0.02)
+
+        # Positional embedding
+        self.pos_embedding = nn.Parameter(torch.randn(1, 600, d_latent) * 0.02)  # Max seq_len = 20*30=600
+
+        # Transformer with increased capacity
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_latent,
+            nhead=n_heads,
+            dim_feedforward=d_latent * 4,
+            dropout=dropout,
+            activation='gelu',  # Use GELU for better gradient flow
+            batch_first=True,
+            norm_first=True  # Pre-layer normalization
         )
-        self.to_logits = torch.nn.Linear(d_latent, n_tokens)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        # Output layer
+        self.norm = nn.LayerNorm(d_latent)
+        self.to_logits = nn.Linear(d_latent, n_tokens)
+
+        # Initialize output layer
+        nn.init.zeros_(self.to_logits.bias)
+        nn.init.normal_(self.to_logits.weight, mean=0.0, std=0.02)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-          # x: (B, h, w) integer tokens
-          B, h, w = x.shape
-          seq_len = h * w
-          x_flat = x.view(B, seq_len)  # (B, seq_len)
-          emb = self.embedding(x_flat)  # (B, seq_len, d_latent)
-          # Shift right for autoregressive prediction (after embedding)
-          emb_shifted = torch.nn.functional.pad(emb, (0, 0, 1, 0), value=0)[:, :-1, :]
-          # Causal mask for TransformerEncoder: shape (seq_len, seq_len)
-          mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
-          out = self.transformer(emb_shifted, mask=mask)  # (B, seq_len, d_latent)
-          logits = self.to_logits(out)  # (B, seq_len, n_tokens)
-          logits = logits.view(B, h, w, self.n_tokens)
-          return logits, {}
+        # x: (B, h, w) integer tokens
+        B, h, w = x.shape
+        seq_len = h * w
+        x_flat = x.view(B, seq_len)  # (B, seq_len)
+
+        # Embed tokens and add positional embeddings
+        emb = self.embedding(x_flat)  # (B, seq_len, d_latent)
+        emb = emb + self.pos_embedding[:, :seq_len, :]  # Add positional embeddings
+
+        # Shift right for autoregressive prediction
+        emb_shifted = torch.nn.functional.pad(emb, (0, 0, 1, 0), value=0)[:, :-1, :]
+
+        # Causal mask
+        mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+
+        # Transformer forward pass
+        out = self.transformer(emb_shifted, mask=mask)  # (B, seq_len, d_latent)
+        out = self.norm(out)  # Apply final normalization
+        logits = self.to_logits(out)  # (B, seq_len, n_tokens)
+        logits = logits.view(B, h, w, self.n_tokens)
+
+        return logits, {}
 
     def generate(self, B: int = 1, h: int = 20, w: int = 30, device=None) -> torch.Tensor:
         """
-        Use your generative model to produce B new token images of size (B, h, w) and type (int/long).
+        Generate B new token images of size (B, h, w).
         """
         if device is None:
             device = next(self.parameters()).device
         self.eval()
         seq_len = h * w
         x_gen = torch.zeros((B, seq_len), dtype=torch.long, device=device)
+
         with torch.no_grad():
             for t in range(seq_len):
-                # Shift right: only use generated tokens up to t
-                x_shifted = torch.nn.functional.pad(x_gen, (1, 0), value=0)[:, :-1]
-                emb = self.embedding(x_shifted)
-                # Causal mask for only t+1 tokens
+                # Get embeddings with positional information
+                emb = self.embedding(x_gen[:, :t])  # (B, t, d_latent)
+                emb = emb + self.pos_embedding[:, :t, :]  # Add positional embeddings
+
+                # Pad for current step
+                emb_padded = torch.nn.functional.pad(emb, (0, 0, 1, 0), value=0)[:, :t + 1, :]
+
+                # Causal mask
                 mask = torch.triu(torch.ones(t + 1, t + 1, device=device), diagonal=1).bool()
-                out = self.transformer(emb[:, :t + 1, :], mask=mask)
-                logits = self.to_logits(out)  # (B, t+1, n_tokens)
-                probs = torch.softmax(logits[:, -1, :], dim=-1)  # (B, n_tokens)
+
+                # Forward pass
+                out = self.transformer(emb_padded, mask=mask)
+                out = self.norm(out)
+                logits = self.to_logits(out[:, -1, :])  # (B, n_tokens)
+
+                # Sample next token
+                probs = torch.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1).squeeze(-1)
                 x_gen[:, t] = next_token
+
         return x_gen.view(B, h, w).to(torch.long)
